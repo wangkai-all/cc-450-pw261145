@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en" data-theme="">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Source Health Monitor</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <h1>Source Health Monitor</h1>
+      <p>Versioned health scoring · stateful collection scheduling · operator recovery</p>
+    </div>
+    <div class="topbar-meta">
+      <span class="pill"><span class="dot live"></span><span id="clock">—</span></span>
+      <span class="pill">Rule <strong id="rule-label">—</strong></span>
+      <button class="btn small" id="theme-toggle" type="button" aria-label="Toggle colour theme">Theme</button>
+      <button class="btn small" id="refresh" type="button">Refresh</button>
+    </div>
+  </header>
+
+  <div class="filters" role="group" aria-label="Filters">
+    <span class="label">Range</span>
+    <div class="seg" id="range-seg">
+      <button type="button" data-hours="24" aria-pressed="false">24h</button>
+      <button type="button" data-hours="72" aria-pressed="false">3d</button>
+      <button type="button" data-hours="168" aria-pressed="true">7d</button>
+      <button type="button" data-hours="336" aria-pressed="false">14d</button>
+    </div>
+    <span class="label" style="margin-left:12px">State</span>
+    <div class="seg" id="state-seg">
+      <button type="button" data-state="all" aria-pressed="true">All</button>
+      <button type="button" data-state="NORMAL" aria-pressed="false">Normal</button>
+      <button type="button" data-state="REDUCED" aria-pressed="false">Reduced</button>
+      <button type="button" data-state="ISOLATED" aria-pressed="false">Isolated</button>
+      <button type="button" data-state="MANUAL" aria-pressed="false">Manual</button>
+    </div>
+    <span class="spacer"></span>
+    <button class="btn small" id="tick" type="button">Run scheduler tick</button>
+  </div>
+
+  <section class="stat-row" aria-label="Fleet summary">
+    <div class="stat hero">
+      <div class="k">Fleet health</div>
+      <div class="v" id="stat-fleet">—</div>
+      <div class="s" id="stat-fleet-sub">mean smoothed score</div>
+    </div>
+    <div class="stat">
+      <div class="k"><span class="ico" style="background:var(--state-normal)"></span>Normal</div>
+      <div class="v" id="stat-normal">—</div>
+      <div class="s" id="stat-normal-sub">full cadence</div>
+    </div>
+    <div class="stat">
+      <div class="k"><span class="ico" style="background:var(--state-reduced)"></span>Reduced</div>
+      <div class="v" id="stat-reduced">—</div>
+      <div class="s" id="stat-reduced-sub">1/3 cadence</div>
+    </div>
+    <div class="stat">
+      <div class="k"><span class="ico" style="background:var(--state-isolated)"></span>Isolated</div>
+      <div class="v" id="stat-isolated">—</div>
+      <div class="s" id="stat-isolated-sub">probe only</div>
+    </div>
+    <div class="stat">
+      <div class="k"><span class="ico" style="background:var(--state-manual)"></span>Manual</div>
+      <div class="v" id="stat-manual">—</div>
+      <div class="s" id="stat-manual-sub">operator hold</div>
+    </div>
+  </section>
+
+  <div class="grid-main">
+    <section class="card">
+      <div class="card-head">
+        <h2>Sources</h2>
+        <span class="sub" id="source-count">—</span>
+      </div>
+      <div class="card-body flush">
+        <div class="table-wrap">
+          <table class="data" id="source-table">
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>State</th>
+                <th>Score</th>
+                <th>Factors</th>
+                <th>Dwell</th>
+                <th>Last reason</th>
+                <th>Next run</th>
+              </tr>
+            </thead>
+            <tbody id="source-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="detail-card" aria-live="polite">
+      <div class="card-head">
+        <h2 id="detail-title">Source detail</h2>
+        <div class="topbar-meta">
+          <span class="chip NORMAL" id="detail-chip"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.2l2.6 2.6L10 3.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="detail-chip-text">—</span></span>
+          <div class="tabs" id="detail-tabs">
+            <button type="button" data-tab="trend" aria-pressed="true">Trend</button>
+            <button type="button" data-tab="table" aria-pressed="false">Table</button>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div id="detail-empty" class="empty-note">Select a source to inspect its score trend, state transitions, degradation reasons and recovery trail.</div>
+        <div id="detail-content" class="hidden">
+          <div class="detail">
+            <div class="detail-col">
+              <div>
+                <div class="section-title" id="trend-title">Score trend</div>
+                <div class="legend" id="trend-legend">
+                  <span class="item"><span class="swatch" style="background:var(--series-1)"></span>Smoothed score</span>
+                  <span class="item"><span class="swatch" style="background:var(--series-1);opacity:.28"></span>Raw window score</span>
+                  <span class="item"><span class="swatch" style="background:var(--state-reduced);height:2px"></span>Reduction floor</span>
+                  <span class="item"><span class="swatch" style="background:var(--state-isolated);height:2px"></span>Isolation floor</span>
+                </div>
+                <div class="chart-host" id="trend-host"></div>
+                <div class="footnote" id="trend-foot"></div>
+                <div class="section-title" style="margin-top:14px" id="state-title">State timeline</div>
+                <div class="legend" id="state-legend"></div>
+                <div class="chart-host" id="state-host"></div>
+                <div class="table-view hidden" id="detail-table-view"></div>
+              </div>
+
+              <div>
+                <div class="section-title">Why it is in this state</div>
+                <div class="factor-list" id="factor-list"></div>
+                <div class="footnote" id="factor-foot"></div>
+              </div>
+
+              <div>
+                <div class="section-title">Operator controls</div>
+                <div class="action-form" id="action-form">
+                  <div class="form-row">
+                    <label>Actor<input id="actor" value="oncall:you" autocomplete="off" /></label>
+                    <label>Hold for (hours, empty = until released)<input id="hold-hours" type="number" min="1" step="1" placeholder="e.g. 12" /></label>
+                  </div>
+                  <label>Reason<textarea id="action-note" placeholder="Why are you holding or releasing this source?"></textarea></label>
+                  <div class="form-row">
+                    <button class="btn" type="button" id="btn-hold">Hold source</button>
+                    <button class="btn primary" type="button" id="btn-release">Release to normal</button>
+                  </div>
+                  <div class="footnote">Holds are audited events. Release is replayed on every recompute, so scoring changes never erase a human decision.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="detail-col">
+              <div>
+                <div class="section-title">Current window</div>
+                <dl class="kv" id="current-kv"></dl>
+              </div>
+              <div>
+                <div class="section-title">State transfers</div>
+                <ul class="events" id="transition-events"></ul>
+                <div class="footnote" id="transition-foot"></div>
+              </div>
+              <div>
+                <div class="section-title">Recovery &amp; probes</div>
+                <ul class="events" id="probe-events"></ul>
+              </div>
+              <div>
+                <div class="section-title">Recent collection runs</div>
+                <ul class="events" id="run-events"></ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Fleet transition log</h2>
+        <span class="sub">Automatic and operator-driven state changes</span>
+      </div>
+      <div class="card-body">
+        <ul class="events" id="fleet-transitions"></ul>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Stability check</h2>
+        <span class="sub">Do transients get mistaken for permanent failures?</span>
+      </div>
+      <div class="card-body">
+        <dl class="kv" id="stability-kv"></dl>
+        <div class="footnote">A single bad window is held at <em>confirmation_pending</em> and never changes the schedule. Demotion needs
+          <span id="stab-confirm">2</span> consecutive raw windows; promotion needs the recovery margin plus a dwell of
+          <span id="stab-dwell">2</span> windows. Catastrophic windows (score below <span id="stab-critical">25</span>) bypass confirmation on purpose.
+        <div class="footnote" id="stab-pending-note"></div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Scoring rule</h2>
+        <span class="sub" id="rule-sub">Publish a new version — history is re-scored, raw monitoring is untouched</span>
+      </div>
+      <div class="card-body">
+        <div class="rules-grid">
+          <div>
+            <div class="rule-form" id="rule-form">
+              <div class="weights" id="weight-fields"></div>
+              <div class="field">
+                <span class="weight-head"><span>Reduction floor</span><span id="reduced-out">72</span></span>
+                <input type="range" id="reduced-below" min="30" max="95" step="1" value="72" />
+              </div>
+              <div class="field">
+                <span class="weight-head"><span>Isolation floor</span><span id="isolated-out">48</span></span>
+                <input type="range" id="isolated-below" min="10" max="90" step="1" value="48" />
+              </div>
+              <div class="form-row">
+                <label class="field">Confirmation windows<input type="number" id="confirm-windows" min="1" max="6" value="2" /></label>
+                <label class="field">Recovery margin<input type="number" id="promote-margin" min="0" max="20" value="6" /></label>
+              </div>
+              <label class="field">Change note<input type="text" id="rule-note" placeholder="Why is this rule changing?" /></label>
+              <div class="form-row">
+                <button class="btn" type="button" id="btn-preview">Preview impact</button>
+                <button class="btn primary" type="button" id="btn-publish">Publish &amp; recompute</button>
+              </div>
+            </div>
+            <div class="footnote">Rule changes are immutable versions. Publishing re-scores every historical window and records a digest of the raw monitoring before and after.</div>
+          </div>
+          <div>
+            <div class="section-title">Preview impact</div>
+            <div id="preview-body"><div class="empty-note">Adjust the rule, then preview to see which windows and sources would change.</div></div>
+            <div class="section-title" style="margin-top:14px">Versions &amp; recompute runs</div>
+            <div id="rule-history"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/app.js" type="module"></script>
+</body>
+</html>
